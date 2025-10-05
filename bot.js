@@ -307,11 +307,15 @@ bot.on('message', async (msg) => {
     );
     session.messageCount++;
     
-    // Send response with model indicator
-    const responseMessage = `${model.name}\n\n${aiResponse}`;
+    // Escape Markdown characters in AI response
+    function escapeMarkdown(text) {
+      return text
+        .replace(/([_\*\[\]\(\)~`>#+\-=|{}.!])/g, '\\$1');
+    }
+    const responseMessage = `${model.name}\n\n${escapeMarkdown(aiResponse)}`;
     
     bot.sendMessage(chatId, responseMessage, {
-      parse_mode: 'Markdown',
+      parse_mode: 'MarkdownV2',
       reply_to_message_id: msg.message_id
     });
     
