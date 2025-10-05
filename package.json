@@ -5,7 +5,10 @@
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js",
-    "dev": "nodemon bot.js"
+    "build": "echo 'No build step required'"
+  },
+  "engines": {
+    "node": "18.x"
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.64.0",
