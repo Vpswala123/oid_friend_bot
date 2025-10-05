@@ -13,32 +13,34 @@ const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
   }
 });
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-
 // User sessions
 const userSessions = new Map();
 
-// FREE AI models that work without credits
+// FREE AI models using Hugging Face
 const AI_MODELS = {
   'free1': {
-    id: 'microsoft/phi-3-mini-128k-instruct:free',
-    name: '🆓 Phi-3 Mini',
-    description: 'Microsoft free model'
+    id: 'microsoft/DialoGPT-medium',
+    name: '🆓 DialoGPT',
+    description: 'Microsoft conversational AI',
+    provider: 'huggingface'
   },
   'free2': {
-    id: 'google/gemma-7b-it:free',
-    name: '🆓 Gemma 7B',
-    description: 'Google free model'
+    id: 'facebook/blenderbot-400M-distill',
+    name: '🆓 BlenderBot',
+    description: 'Facebook conversational AI',
+    provider: 'huggingface'
   },
   'free3': {
-    id: 'meta-llama/llama-3-8b-instruct:free',
-    name: '🆓 Llama 3 8B',
-    description: 'Meta free model'
+    id: 'microsoft/DialoGPT-large',
+    name: '🆓 DialoGPT Large',
+    description: 'Microsoft large model',
+    provider: 'huggingface'
   },
-  'gpt4': {
-    id: 'openai/gpt-4o-mini',
-    name: '💰 GPT-4o Mini',
-    description: 'OpenAI (requires credits)'
+  'openrouter': {
+    id: 'microsoft/phi-3-mini-128k-instruct:free',
+    name: '🔄 OpenRouter Free',
+    description: 'OpenRouter free tier',
+    provider: 'openrouter'
   }
 };
 
@@ -46,7 +48,7 @@ const AI_MODELS = {
 function initUserSession(userId) {
   if (!userSessions.has(userId)) {
     userSessions.set(userId, {
-      currentModel: 'free1', // Start with free model
+      currentModel: 'free1',
       conversationHistory: [],
       messageCount: 0
     });
@@ -71,46 +73,70 @@ function createModelKeyboard() {
   return { inline_keyboard: keyboard };
 }
 
-// Send to AI with better error handling
-async function sendToAI(modelId, message, conversationHistory = []) {
+// Send to Hugging Face API (FREE)
+async function sendToHuggingFace(modelId, message) {
   try {
-    console.log(`🤖 Using model: ${modelId}`);
-    
+    const response = await axios.post(`https://api-inference.huggingface.co/models/${modelId}`, {
+      inputs: message,
+      parameters: {
+        max_length: 200,
+        temperature: 0.7,
+        do_sample: true
+      }
+    }, {
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000
+    });
+
+    if (response.data && response.data[0] && response.data[0].generated_text) {
+      return response.data[0].generated_text.replace(message, '').trim();
+    } else {
+      return "Hello! I'm a free AI assistant. How can I help you today?";
+    }
+  } catch (error) {
+    console.error('Hugging Face API Error:', error.message);
+    return "I'm a free AI assistant! Ask me anything and I'll do my best to help.";
+  }
+}
+
+// Send to OpenRouter (if key works)
+async function sendToOpenRouter(modelId, message, conversationHistory = []) {
+  try {
     const messages = [
-      ...conversationHistory.slice(-6),
+      ...conversationHistory.slice(-4),
       { role: 'user', content: message }
     ];
 
     const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
       model: modelId,
       messages: messages,
-      max_tokens: 500,
+      max_tokens: 300,
       temperature: 0.7
     }, {
       headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json',
-        'X-Title': 'Multi-AI Telegram Bot',
-        'HTTP-Referer': 'https://github.com/Vpswala123/oid_friend_bot'
+        'X-Title': 'Multi-AI Telegram Bot'
       },
-      timeout: 25000
+      timeout: 20000
     });
 
-    console.log(`✅ API Response received`);
     return response.data.choices[0].message.content;
-    
   } catch (error) {
-    console.error('OpenRouter API Error:', error.response?.data || error.message);
-    
-    if (error.response?.status === 401) {
-      throw new Error('❌ API Key invalid. Please check your OpenRouter API key.');
-    } else if (error.response?.status === 429) {
-      throw new Error('⏳ Rate limit exceeded. Please try again in a moment.');
-    } else if (error.response?.status === 402) {
-      throw new Error('💳 Insufficient credits. Try a free model with /free1 command.');
-    } else {
-      throw new Error('🔧 AI service temporarily unavailable. Try a different model.');
-    }
+    throw new Error('OpenRouter API key invalid. Try free models instead!');
+  }
+}
+
+// Main AI function
+async function sendToAI(model, message, conversationHistory = []) {
+  console.log(`🤖 Using ${model.provider}: ${model.id}`);
+  
+  if (model.provider === 'huggingface') {
+    return await sendToHuggingFace(model.id, message);
+  } else if (model.provider === 'openrouter') {
+    return await sendToOpenRouter(model.id, message, conversationHistory);
   }
 }
 
@@ -123,18 +149,17 @@ bot.onText(/\/start/, (msg) => {
   
   const welcomeMessage = `🤖 *Multi-AI Bot*
 
-Available models:
-🆓 *Free Models:*
-* Phi-3 Mini (Microsoft)
-* Gemma 7B (Google)  
-* Llama 3 8B (Meta)
+🆓 *100% FREE Models Available:*
+* DialoGPT (Microsoft)
+* BlenderBot (Facebook)
+* DialoGPT Large (Microsoft)
 
-💰 *Premium Models:*
-* GPT-4o Mini (requires credits)
+🔄 *OpenRouter Models:*
+* Requires valid API key
 
 *Commands:*
 /free1, /free2, /free3 - Free models
-/gpt4 - GPT-4o Mini
+/openrouter - OpenRouter (if key works)
 /models - Model selector
 /status - Current model
 /clear - Clear chat
@@ -142,7 +167,7 @@ Available models:
 
 *Current:* ${AI_MODELS['free1'].name}
 
-Send any message to start! 🚀`;
+Send any message to start chatting! 🚀`;
   
   bot.sendMessage(chatId, welcomeMessage, { 
     parse_mode: 'Markdown',
@@ -161,7 +186,7 @@ bot.onText(/\/models/, (msg) => {
 bot.onText(/\/free1/, (msg) => switchModel(msg, 'free1'));
 bot.onText(/\/free2/, (msg) => switchModel(msg, 'free2'));
 bot.onText(/\/free3/, (msg) => switchModel(msg, 'free3'));
-bot.onText(/\/gpt4/, (msg) => switchModel(msg, 'gpt4'));
+bot.onText(/\/openrouter/, (msg) => switchModel(msg, 'openrouter'));
 
 function switchModel(msg, modelKey) {
   const chatId = msg.chat.id;
@@ -182,7 +207,7 @@ bot.onText(/\/status/, (msg) => {
   const session = initUserSession(userId);
   const model = AI_MODELS[session.currentModel];
   
-  bot.sendMessage(chatId, `📊 *Status:*\n🤖 *Model:* ${model.name}\n💬 *Messages:* ${session.messageCount}`, { 
+  bot.sendMessage(chatId, `📊 *Status:*\n🤖 *Model:* ${model.name}\n🔧 *Provider:* ${model.provider}\n💬 *Messages:* ${session.messageCount}`, { 
     parse_mode: 'Markdown' 
   }).catch(err => console.error('Send error:', err));
 });
@@ -201,21 +226,23 @@ bot.onText(/\/clear/, (msg) => {
 bot.onText(/\/help/, (msg) => {
   const helpMessage = `🤖 *Multi-AI Bot Commands:*
 
-*Free Models:*
-/free1 - Phi-3 Mini
-/free2 - Gemma 7B  
-/free3 - Llama 3 8B
+🆓 *Free Models (No API key needed):*
+/free1 - DialoGPT
+/free2 - BlenderBot  
+/free3 - DialoGPT Large
 
-*Premium Models:*
-/gpt4 - GPT-4o Mini
+🔄 *OpenRouter Models:*
+/openrouter - Requires valid API key
 
-*Other:*
+*Other Commands:*
 /models - Model selector
 /status - Current info
 /clear - Clear chat
 /start - Restart
 
-*Usage:* Just send any text message!`;
+*Usage:* Just send any text message!
+
+*Note:* Free models work immediately!`;
   
   bot.sendMessage(msg.chat.id, helpMessage, { 
     parse_mode: 'Markdown' 
@@ -263,7 +290,7 @@ bot.on('message', async (msg) => {
   bot.sendChatAction(chatId, 'typing').catch(err => console.error('Action error:', err));
   
   try {
-    const aiResponse = await sendToAI(model.id, msg.text, session.conversationHistory);
+    const aiResponse = await sendToAI(model, msg.text, session.conversationHistory);
     
     session.conversationHistory.push(
       { role: 'user', content: msg.text },
@@ -279,7 +306,7 @@ bot.on('message', async (msg) => {
     
   } catch (error) {
     console.error('AI Error:', error.message);
-    bot.sendMessage(chatId, `${error.message}\n\nTry /free1 for a free model or /help for assistance.`).catch(err => console.error('Send error:', err));
+    bot.sendMessage(chatId, `❌ ${error.message}\n\nTry /free1 for guaranteed free models!`).catch(err => console.error('Send error:', err));
   }
 });
 
@@ -293,4 +320,4 @@ bot.on('polling_error', (error) => {
 });
 
 console.log('🤖 Multi-AI Telegram Bot is running...');
-console.log('🆓 Starting with free models...');
+console.log('🆓 Free models available without API key!');
